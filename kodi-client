@@ -1,0 +1,210 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use utf8;
+
+use Pod::Usage;
+use Getopt::Long;
+use LWP::UserAgent;
+use JSON::XS;
+use Data::Dumper;
+
+GetOptions(
+    'help'          => \my $help,
+    
+    'ssl'           => \(my $ssl        = 0),
+    'host=s'        => \(my $host       = $ENV{KODI_HOST}),
+    'port=i',       => \(my $port       = $ENV{KODI_PORT}),
+    'login=s',      => \(my $login      = $ENV{KODI_LOGIN}),
+    'password=s',   => \(my $password   = $ENV{KODI_PASSWORD}),
+
+    'playpause'     => \my $playpause,
+    'stop'          => \my $stop,
+    'next'          => \my $next,
+    'prev'          => \my $prev,
+    
+    'mute'          => \my $mute,
+    'volup'         => \my $volup,
+    'voldown'       => \my $voldown,
+
+    'up'            => \my $up,
+    'down'          => \my $down,
+    'left'          => \my $left,
+    'right'         => \my $right,
+    'enter'         => \my $enter,
+    'back'          => \my $back,
+    'info'          => \my $info,
+    'menu'          => \my $menu,
+);
+pod2usage(-verbose => 2, -noperldoc => 1) if $help;
+
+my $scheme = $ssl ? 'https' : 'http';
+my $url = "$scheme://$host:$port/jsonrpc";
+my %rpc = (jsonrpc => '2.0', id => 1, method => undef);
+
+my $ua = LWP::UserAgent->new(timeout => 5);
+$ua->credentials("$host:$port", "XBMC", $login, $password);
+
+# Send command
+my %opts = (
+    $playpause  ? (
+        method => 'Player.PlayPause', 
+        params => {'playerid' => _playerid()}
+    )                                               :
+    $stop       ? (
+        method => 'Player.Stop', 
+        params => {'playerid' => _playerid()}
+    )                                               :
+    $next       ? (
+        method => 'Player.GoTo', 
+        params => {'playerid' => _playerid(), to => 'next'}
+    )                                               :
+    $prev       ? (
+        method => 'Player.GoTo', 
+        params => {'playerid' => _playerid(), to => 'previous'}
+    )                                               :
+    
+    $mute       ? (
+        method => 'Application.SetMute',
+        params => {'mute' => 'toggle'}
+    )                                               :
+    $volup      ? (
+        method => 'Application.SetVolume',
+        params => {'volume' => _volume() + 5}
+    )                                               :
+    $voldown    ? (
+        method => 'Application.SetVolume',
+        params => {'volume' => _volume() - 5}
+    )                                               :
+    
+    $up         ? (method => 'Input.Up')            :
+    $down       ? (method => 'Input.Down')          :
+    $left       ? (method => 'Input.Left')          :
+    $right      ? (method => 'Input.Right')         :
+    $enter      ? (method => 'Input.Select')        :
+    $back       ? (method => 'Input.Back')          :
+    $info       ? (method => 'Input.Info')          :
+    $menu       ? (method => 'Input.ContextMenu')   :
+                  die 'Unknown method'
+);
+my $result2 = _rpc(%opts);
+
+sub _playerid {
+    my $result = _rpc(method => 'Player.GetActivePlayers');
+    die 'Unsupported method' unless 'ARRAY' eq ref $result;
+    return undef unless @$result;
+    return $result->[0]{playerid};
+}
+
+sub _volume {
+    my $result = _rpc(
+        method => 'Application.GetProperties',
+        params => { properties => ['volume'] },
+    );
+    die 'Unsupported method'    unless 'HASH' eq ref $result;
+    die 'Unknown response'      unless exists $result->{volume};
+    return int $result->{volume};
+}
+
+sub _rpc {
+    my (%args) = @_;
+    
+    my $req = HTTP::Request->new(POST => $url);
+    $req->content_type('application/json');
+    $req->content(encode_json { %rpc, %args });
+    
+    my $res = $ua->request( $req );
+    $res->is_success or die $res->message;
+
+    my $result = decode_json( $res->decoded_content );
+    die Dumper $result if $result->{error};
+
+    return $result->{result};
+}
+
+__DATA__
+
+=encoding utf-8
+
+=head1 NAME
+
+kodi-client - simple kodi client
+
+=head1 OPTIONS
+
+=head2 Common
+
+=over
+
+=item --help
+
+This help
+
+=item --host
+
+Kodi RPC host
+
+=item --port
+
+Kodi RPC port
+
+=item --login
+
+Kodi RPC login
+
+=item --password
+
+Kodi RPC password
+
+=item --ssl
+
+Use https instead of http
+
+=back
+
+=head2 Manage
+
+=over
+
+=item --playpause
+
+=item --stop
+
+=item --next
+
+=item --prev
+
+=item --up
+
+=item --down
+
+=item --left
+
+=item --right
+
+=item --enter
+
+=item --back
+
+=item --info
+
+=item --menu
+
+=item --volup
+
+=item --voldown
+
+=item --mute
+
+=back
+
+=head1 COPYRIGHT
+
+Copyright (C) 2016 Roman V. Nikolaev <rshadow@rambler.ru>
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
+
+=cut
+
